@@ -44,6 +44,10 @@ TAG_KEYS = {
 
 
 def build_designer_filter_by(normal_search, region=None):
+    """Build Typesense filter. Region is NOT auto-mapped to country
+    (country stores full names like 'India', while region is IN/US for pricing).
+    Pass country/state via Normal_search when you want to filter by location.
+    """
     if not isinstance(normal_search, dict):
         raise ValueError("Normal_search must be a JSON object")
 
@@ -67,11 +71,6 @@ def build_designer_filter_by(normal_search, region=None):
         if isinstance(value, bool):
             value = str(value).lower()
         filters.append(f"{schema_field}:={escape_filter_value(value)}")
-
-    if region:
-        region = region.strip().upper()
-        if region:
-            filters.append(f"country:={escape_filter_value(region)}")
 
     return " && ".join(filters) if filters else None
 
@@ -146,6 +145,14 @@ def search_designers_core(payload):
 
     if filter_by:
         params["filter_by"] = filter_by
+
+    logger.info(
+        "designer search q=%r filter_by=%r page=%s per_page=%s",
+        params.get("q"),
+        params.get("filter_by"),
+        page,
+        fetch_limit,
+    )
 
     client = get_client()
     response = client.multi_search.perform({"searches": [params]}, {})
