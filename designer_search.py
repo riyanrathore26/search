@@ -1,22 +1,15 @@
-"""
-Designer search module.
-Returns only designers (products used internally for designer_id priority).
-"""
-import os
+"""Designer search module."""
 import logging
 from product_search import (
-    get_model,
-    get_client,
     generate_query_embedding,
-    generate_s3_url,
     escape_filter_value,
     has_search_criteria,
     search_products,
-    MODEL_DATA_BUCKET,
     DEFAULT_LIMIT,
     MAX_LIMIT,
     MAX_VECTOR_K,
 )
+from utils import get_client, generate_s3_url, MODEL_DATA_BUCKET
 
 logger = logging.getLogger(__name__)
 
@@ -36,31 +29,33 @@ DESIGNER_FIELD_MAP = {
     "Node-2 Art Style": "profile_tags",
 }
 
+TAG_KEYS = {
+    "profile_tags", "node_0", "node_1", "node_2",
+    "Node-0 Art Style", "Node-1 Art Style", "Node-2 Art Style",
+}
+
 
 def build_designer_filter_by(normal_search, region=None):
-    filters = []
     if not isinstance(normal_search, dict):
         raise ValueError("Normal_search must be a JSON object")
 
-    for payload_key, value in normal_search.items():
+    filters = []
+    for key, value in normal_search.items():
         if value is None or value == "":
             continue
 
         if isinstance(value, list):
-            if payload_key in (
-                "profile_tags", "node_0", "node_1", "node_2",
-                "Node-0 Art Style", "Node-1 Art Style", "Node-2 Art Style",
-            ):
+            if key in TAG_KEYS:
                 for v in value:
                     if v is not None and v != "":
                         filters.append(f"profile_tags:={escape_filter_value(v)}")
                 continue
-            raise ValueError(f"Normal_search.{payload_key} must be a scalar or list")
+            raise ValueError(f"Normal_search.{key} must be a scalar or list")
 
-        if payload_key not in DESIGNER_FIELD_MAP:
+        if key not in DESIGNER_FIELD_MAP:
             continue
 
-        schema_field = DESIGNER_FIELD_MAP[payload_key]
+        schema_field = DESIGNER_FIELD_MAP[key]
         if isinstance(value, bool):
             value = str(value).lower()
         filters.append(f"{schema_field}:={escape_filter_value(value)}")
@@ -77,9 +72,9 @@ def validate_designer_payload(payload):
     if not isinstance(payload, dict):
         raise ValueError("Payload must be a JSON object")
 
-    normal_search = payload.get("Normal_search", {}) or {}
-    filter_search = payload.get("Filter_search", {}) or {}
-    pagination = payload.get("pagination", {}) or {}
+    normal_search = payload.get("Normal_search") or {}
+    filter_search = payload.get("Filter_search") or {}
+    pagination = payload.get("pagination") or {}
 
     if not isinstance(normal_search, dict):
         raise ValueError("Normal_search must be a JSON object")
@@ -99,11 +94,7 @@ def validate_designer_payload(payload):
     if not 1 <= limit <= MAX_LIMIT:
         raise ValueError(f"pagination.limit must be between 1 and {MAX_LIMIT}")
 
-    semantic_query = payload.get("Semantic_search", "")
-    if semantic_query is None:
-        semantic_query = ""
-    semantic_query = semantic_query.strip()
-
+    semantic_query = (payload.get("Semantic_search") or "").strip()
     region = (payload.get("region") or "").strip().upper() or "US"
     return semantic_query, normal_search, filter_search, skip, limit, region
 
@@ -112,7 +103,6 @@ def search_designers_core(payload):
     semantic_query, normal_search, filter_search, skip, limit, region = (
         validate_designer_payload(payload)
     )
-
     filter_by = build_designer_filter_by(normal_search, region)
 
     page = (skip // limit) + 1
@@ -144,7 +134,7 @@ def search_designers_core(payload):
 
     client = get_client()
     response = client.multi_search.perform({"searches": [params]}, {})
-    results = response.get("results", [])
+    results = response.get("results") or []
     if not results:
         raise RuntimeError("Typesense returned no designer search result")
     result = results[0]
@@ -153,9 +143,8 @@ def search_designers_core(payload):
 
     hits = result.get("hits", [])[offset : offset + limit]
     designers = []
-
     for hit in hits:
-        designer = dict(hit.get("document", {}))
+        designer = dict(hit.get("document") or {})
         designer.pop("embedding", None)
         if designer.get("profile_image_key"):
             designer["profile_image_url"] = generate_s3_url(
@@ -170,11 +159,7 @@ def search_designers_core(payload):
         "query": semantic_query,
         "count": len(designers),
         "found": result.get("found", len(designers)),
-        "pagination": {
-            "skip": skip,
-            "limit": limit,
-            "next_skip": skip + len(designers),
-        },
+        "pagination": {"skip": skip, "limit": limit, "next_skip": skip + len(designers)},
         "designers": designers,
     }
 
@@ -184,25 +169,23 @@ def fetch_designers_by_ids(user_ids, limit=50):
         return []
 
     ids = [escape_filter_value(uid) for uid in user_ids]
-    filter_by = f"user_id:=[{','.join(ids)}]"
-
     params = {
         "collection": DESIGNERS_COLLECTION,
         "q": "*",
-        "filter_by": filter_by,
+        "filter_by": f"user_id:=[{','.join(ids)}]",
         "per_page": min(len(user_ids), limit),
         "exclude_fields": "embedding",
     }
 
     client = get_client()
     response = client.multi_search.perform({"searches": [params]}, {})
-    results = response.get("results", [])
+    results = response.get("results") or []
     if not results or results[0].get("error"):
         return []
 
     designers = []
     for hit in results[0].get("hits", []):
-        designer = dict(hit.get("document", {}))
+        designer = dict(hit.get("document") or {})
         designer.pop("embedding", None)
         if designer.get("profile_image_key"):
             designer["profile_image_url"] = generate_s3_url(
@@ -224,18 +207,11 @@ def empty_designers_block(skip=0, limit=DEFAULT_LIMIT):
 
 
 def search_designers(payload):
-    """
-    designer_search entry point.
-    - Direct semantic/filter matches first
-    - Then designers linked via product hits (designer_id)
-    - Products are NOT returned
-    """
+    """Designer search: direct matches + designers linked via product hits."""
     if not has_search_criteria(payload):
         return empty_designers_block()
 
-    # internal product search only for designer_ids
     _, product_designer_ids = search_products(payload, return_designer_ids=True)
-
     designer_result = search_designers_core(payload)
     direct = designer_result["designers"]
     seen = {str(d.get("user_id")) for d in direct if d.get("user_id")}
