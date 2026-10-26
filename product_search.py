@@ -231,16 +231,18 @@ def search_products(payload, return_designer_ids=False):
 
     # Text-match priority (high → low):
     #   product headline → product description → product tags → designs (RASIN)
-    #   → store name → designer name → designer country → country
-    # (store_description / store_genres / store_tags live on the designers
-    #  collection inside stores[] and are covered by designer search_text)
+    #   → store name → designer name → country
+    # Only use fields known to be queryable on the products schema.
+    # designer_country is filterable via FIELD_MAP but not in query_by
+    # (Typesense rejects unknown query_by fields). store_description /
+    # store_genres / store_tags live on designers and are covered there.
     params = {
         "collection": COLLECTION_NAME,
         "query_by": (
             "design_headline,design_description,design_hashtags,RASIN,"
-            "store_name,designer_name,designer_country,country"
+            "store_name,designer_name,country"
         ),
-        "query_by_weights": "10,9,8,6,5,4,3,2",
+        "query_by_weights": "10,9,8,6,5,4,2",
         "per_page": fetch_limit,
         "page": page,
         "exclude_fields": "embedding",
@@ -274,7 +276,11 @@ def search_products(payload, return_designer_ids=False):
         raise RuntimeError("Typesense returned no search result object")
     result = results[0]
     if result.get("error"):
-        raise RuntimeError(result["error"])
+        err = result["error"]
+        logger.error("Typesense product search error: %s | params=%s", err, {
+            k: params.get(k) for k in ("q", "query_by", "query_by_weights", "filter_by", "sort_by")
+        })
+        raise RuntimeError(err)
 
     hits = result.get("hits", [])[offset : offset + limit]
     products = []

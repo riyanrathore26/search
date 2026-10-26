@@ -2,7 +2,7 @@
 
 Product text priority (query_by_weights):
   design_headline > design_description > design_hashtags > RASIN
-  > store_name > designer_name > designer_country > country
+  > store_name > designer_name > country
 
 Designer text priority:
   search_text (store_name, store_description, store_genres, store_tags, …)
