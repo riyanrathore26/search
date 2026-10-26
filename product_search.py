@@ -251,6 +251,14 @@ def search_products(payload, return_designer_ids=False):
     if sort_by:
         params["sort_by"] = sort_by
 
+    logger.info(
+        "product search q=%r filter_by=%r sort_by=%r page=%s",
+        params.get("q"),
+        params.get("filter_by"),
+        params.get("sort_by"),
+        page,
+    )
+
     client = get_client()
     response = client.multi_search.perform({"searches": [params]}, {})
     results = response.get("results") or []
