@@ -10,7 +10,16 @@ logger = logging.getLogger(__name__)
 
 
 def make_response(status_code, body):
-    return {"statusCode": status_code, "body": body}
+    return {
+        "statusCode": status_code,
+        "headers": {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Content-Type,Authorization",
+            "Access-Control-Allow-Methods": "POST,OPTIONS",
+        },
+        "body": json.dumps(body, default=str),
+    }
 
 
 def parse_payload(event):
@@ -24,6 +33,8 @@ def parse_payload(event):
     if "body" in event:
         body = event["body"]
         if isinstance(body, str):
+            if not body.strip():
+                raise ValueError("Request body is empty")
             try:
                 payload = json.loads(body)
             except json.JSONDecodeError as exc:
@@ -73,6 +84,15 @@ def lambda_handler(event, context):
             return make_response(200, {"message": "OK"})
 
         search_type, inner = detect_search_type(payload)
+        if not isinstance(inner, dict):
+            raise ValueError(f"{search_type} must be a JSON object")
+
+        logger.info(
+            "search_type=%s semantic=%r region=%r",
+            search_type,
+            (inner.get("Semantic_search") or "")[:80],
+            inner.get("region"),
+        )
 
         if search_type == "products_search":
             products_block = search_products(inner)
