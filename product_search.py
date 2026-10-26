@@ -1,19 +1,11 @@
-"""
-Product search module.
-Use your proven Lambda product-search logic here.
-"""
-import json
+"""Product search module."""
 import math
-import os
 import logging
-from lambda_function import generate_s3_url, get_client, get_model
+from utils import generate_s3_url, get_client, get_model, MODEL_DATA_BUCKET
 
 logger = logging.getLogger(__name__)
 
-
 COLLECTION_NAME = "products"
-MODEL_DATA_BUCKET = "wyidesigns-in"
-DATE_FIELD = os.environ.get("DATE_FIELD", "action_date_time")
 DEFAULT_LIMIT = 20
 MAX_LIMIT = 250
 MAX_VECTOR_K = 1000
@@ -39,20 +31,16 @@ FIELD_MAP = {
 }
 
 
-
 def generate_query_embedding(query):
     model = get_model()
-    vectors = model.embed([query])
-    vector = [float(value) for value in next(vectors)]
+    vector = [float(v) for v in next(model.embed([query]))]
     if len(vector) != 384:
         raise ValueError(f"Expected 384 embedding dimensions, got {len(vector)}")
     return vector
 
 
 def escape_filter_value(value):
-    value = str(value)
-    value = value.replace("\\", "\\\\")
-    value = value.replace("`", "\\`")
+    value = str(value).replace("\\", "\\\\").replace("`", "\\`")
     return f"`{value}`"
 
 
@@ -74,26 +62,23 @@ def resolve_price_field(payload):
 
 
 def build_filter_by(normal_search, filter_search, price_field):
-    filters = []
     if not isinstance(normal_search, dict):
         raise ValueError("Normal_search must be a JSON object")
+    if not isinstance(filter_search, dict):
+        raise ValueError("Filter_search must be a JSON object")
 
-    for payload_key, value in normal_search.items():
+    filters = []
+    for key, value in normal_search.items():
         if value is None or value == "":
             continue
         if isinstance(value, (dict, list)):
-            raise ValueError(f"Normal_search.{payload_key} must be a scalar value")
-        if payload_key not in FIELD_MAP:
-            raise ValueError(
-                f"Unsupported Normal_search field: {payload_key}. Add it to FIELD_MAP."
-            )
-        schema_field = FIELD_MAP[payload_key]
+            raise ValueError(f"Normal_search.{key} must be a scalar value")
+        if key not in FIELD_MAP:
+            raise ValueError(f"Unsupported Normal_search field: {key}. Add it to FIELD_MAP.")
+        schema_field = FIELD_MAP[key]
         if isinstance(value, bool):
             value = str(value).lower()
         filters.append(f"{schema_field}:={escape_filter_value(value)}")
-
-    if not isinstance(filter_search, dict):
-        raise ValueError("Filter_search must be a JSON object")
 
     filters.append("on_sale:=`yes`")
 
@@ -119,15 +104,11 @@ def build_sort_by(filter_search, price_field, semantic_query):
     if not isinstance(filter_search, dict):
         raise ValueError("Filter_search must be a JSON object")
 
-    sort_options = filter_search.get("sort") or {}
-    if not isinstance(sort_options, dict):
-        raise ValueError("Filter_search.sort must be a JSON object")
+    sort_options = dict(filter_search.get("sort") or {})
+    for legacy in ("low_to_hight", "hight_to_low"):
+        if legacy in filter_search:
+            sort_options.setdefault(legacy, filter_search[legacy])
 
-    for legacy_key in ("low_to_hight", "hight_to_low"):
-        if legacy_key in filter_search:
-            sort_options.setdefault(legacy_key, filter_search[legacy_key])
-
-    # Price sorts only — action_date_time is not in the products schema
     sort_mapping = {
         "low_to_hight": f"{price_field}:asc",
         "hight_to_low": f"{price_field}:desc",
@@ -156,9 +137,9 @@ def validate_payload(payload):
     if not isinstance(payload, dict):
         raise ValueError("Payload must be a JSON object")
 
-    normal_search = payload.get("Normal_search", {}) or {}
-    filter_search = payload.get("Filter_search", {}) or {}
-    pagination = payload.get("pagination", {}) or {}
+    normal_search = payload.get("Normal_search") or {}
+    filter_search = payload.get("Filter_search") or {}
+    pagination = payload.get("pagination") or {}
 
     if not isinstance(normal_search, dict):
         raise ValueError("Normal_search must be a JSON object")
@@ -178,9 +159,7 @@ def validate_payload(payload):
     if not 1 <= limit <= MAX_LIMIT:
         raise ValueError(f"pagination.limit must be between 1 and {MAX_LIMIT}")
 
-    semantic_query = payload.get("Semantic_search", "")
-    if semantic_query is None:
-        semantic_query = ""
+    semantic_query = payload.get("Semantic_search") or ""
     if not isinstance(semantic_query, str):
         raise ValueError("Semantic_search must be a string")
     semantic_query = semantic_query.strip()
@@ -189,58 +168,51 @@ def validate_payload(payload):
 
 
 def has_search_criteria(payload):
-    semantic_query = payload.get("Semantic_search", "")
-    if isinstance(semantic_query, str) and semantic_query.strip():
+    semantic = payload.get("Semantic_search") or ""
+    if isinstance(semantic, str) and semantic.strip():
         return True
-    if semantic_query is not None and not isinstance(semantic_query, str):
-        return True
-
-    normal_search = payload.get("Normal_search", {}) or {}
-    filter_search = payload.get("Filter_search", {}) or {}
-    if not isinstance(normal_search, dict) or not isinstance(filter_search, dict):
+    if semantic and not isinstance(semantic, str):
         return True
 
-    for value in normal_search.values():
-        if value is not None and value != "":
-            return True
+    normal = payload.get("Normal_search") or {}
+    filters = payload.get("Filter_search") or {}
+    if not isinstance(normal, dict) or not isinstance(filters, dict):
+        return True
 
-    range_search = filter_search.get("range_search") or {}
-    if isinstance(range_search, dict):
-        for value in range_search.values():
-            if value is not None and value != "":
-                return True
+    if any(v is not None and v != "" for v in normal.values()):
+        return True
 
-    sort_search = filter_search.get("sort") or {}
-    if isinstance(sort_search, dict):
-        for value in sort_search.values():
-            if value is True:
-                return True
+    range_search = filters.get("range_search") or {}
+    if isinstance(range_search, dict) and any(v is not None and v != "" for v in range_search.values()):
+        return True
+
+    sort_opts = filters.get("sort") or {}
+    if isinstance(sort_opts, dict) and any(v is True for v in sort_opts.values()):
+        return True
 
     return False
 
 
+def _empty_products(limit=DEFAULT_LIMIT):
+    return {
+        "Semantic_search": "",
+        "region": "US",
+        "price_field": "price_usd",
+        "search_mode": "empty",
+        "filters_applied": None,
+        "sort_applied": "default order",
+        "count": 0,
+        "found": 0,
+        "pagination": {"skip": 0, "limit": limit, "next_skip": 0},
+        "products": [],
+    }
+
+
 def search_products(payload, return_designer_ids=False):
-    """
-    Main product search entry point.
-    If return_designer_ids=True, also returns a set of designer_id values
-    (used by designer_search for priority merge).
-    """
+    """Main product search. Optionally return designer_ids for designer_search merge."""
     if not has_search_criteria(payload):
-        empty = {
-            "Semantic_search": "",
-            "region": "US",
-            "price_field": "price_usd",
-            "search_mode": "empty",
-            "filters_applied": None,
-            "sort_applied": "default order",
-            "count": 0,
-            "found": 0,
-            "pagination": {"skip": 0, "limit": DEFAULT_LIMIT, "next_skip": 0},
-            "products": [],
-        }
-        if return_designer_ids:
-            return empty, set()
-        return empty
+        empty = _empty_products()
+        return (empty, set()) if return_designer_ids else empty
 
     semantic_query, normal_search, filter_search, skip, limit = validate_payload(payload)
     price_field = resolve_price_field(payload)
@@ -259,10 +231,7 @@ def search_products(payload, return_designer_ids=False):
 
     params = {
         "collection": COLLECTION_NAME,
-        "query_by": (
-            "design_headline,design_hashtags,design_description,"
-            "RASIN,designer_name,store_name,country"
-        ),
+        "query_by": "design_headline,design_hashtags,design_description,RASIN,designer_name,store_name,country",
         "query_by_weights": "10,8,6,5,4,1,1",
         "per_page": fetch_limit,
         "page": page,
@@ -284,7 +253,7 @@ def search_products(payload, return_designer_ids=False):
 
     client = get_client()
     response = client.multi_search.perform({"searches": [params]}, {})
-    results = response.get("results", [])
+    results = response.get("results") or []
     if not results:
         raise RuntimeError("Typesense returned no search result object")
     result = results[0]
@@ -296,34 +265,31 @@ def search_products(payload, return_designer_ids=False):
     designer_ids = set()
 
     for hit in hits:
-        document = dict(hit.get("document", {}))
-        document.pop("embedding", None)
+        doc = dict(hit.get("document") or {})
+        doc.pop("embedding", None)
 
-        model_data = document.get("model_data", [])
+        model_data = doc.get("model_data") or []
         if isinstance(model_data, list):
             updated = []
             for model in model_data:
                 if isinstance(model, dict):
                     model = dict(model)
                     if model.get("mockup_key"):
-                        model["mockup_url"] = generate_s3_url(
-                            MODEL_DATA_BUCKET, model["mockup_key"]
-                        )
+                        model["mockup_url"] = generate_s3_url(MODEL_DATA_BUCKET, model["mockup_key"])
                     if model.get("resized_mockup_key"):
                         model["resized_mockup_url"] = generate_s3_url(
                             MODEL_DATA_BUCKET, model["resized_mockup_key"]
                         )
                 updated.append(model)
-            document["model_data"] = updated
+            doc["model_data"] = updated
 
         if "vector_distance" in hit:
-            document["score"] = hit["vector_distance"]
+            doc["score"] = hit["vector_distance"]
 
-        did = document.get("designer_id")
+        did = doc.get("designer_id")
         if did:
             designer_ids.add(str(did))
-
-        products.append(document)
+        products.append(doc)
 
     body = {
         "Semantic_search": semantic_query,
@@ -334,14 +300,8 @@ def search_products(payload, return_designer_ids=False):
         "sort_applied": sort_by or "default order",
         "count": len(products),
         "found": result.get("found", len(products)),
-        "pagination": {
-            "skip": skip,
-            "limit": limit,
-            "next_skip": skip + len(products),
-        },
+        "pagination": {"skip": skip, "limit": limit, "next_skip": skip + len(products)},
         "products": products,
     }
 
-    if return_designer_ids:
-        return body, designer_ids
-    return body
+    return (body, designer_ids) if return_designer_ids else body
