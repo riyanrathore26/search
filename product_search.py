@@ -229,10 +229,18 @@ def search_products(payload, return_designer_ids=False):
             "skip is not aligned with limit and would require fetching more than MAX_LIMIT results."
         )
 
+    # Text-match priority (high → low):
+    #   product headline → product description → product tags → designs (RASIN)
+    #   → store name → designer name → designer country → country
+    # (store_description / store_genres / store_tags live on the designers
+    #  collection inside stores[] and are covered by designer search_text)
     params = {
         "collection": COLLECTION_NAME,
-        "query_by": "design_headline,design_hashtags,design_description,RASIN,designer_name,store_name,country",
-        "query_by_weights": "10,8,6,5,4,1,1",
+        "query_by": (
+            "design_headline,design_description,design_hashtags,RASIN,"
+            "store_name,designer_name,designer_country,country"
+        ),
+        "query_by_weights": "10,9,8,6,5,4,3,2",
         "per_page": fetch_limit,
         "page": page,
         "exclude_fields": "embedding",

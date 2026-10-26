@@ -15,11 +15,11 @@ logger = logging.getLogger(__name__)
 
 DESIGNERS_COLLECTION = "designers"
 
-# Actual schema fields (store_name / store_description / store_genres live
-# inside stores[] and are already concatenated into search_text).
-# Priority via weights:
-#   search_text (includes store_name, store_description, store_genres) >
-#   first_name, last_name > bio > profile_tags > state
+# Actual schema fields (store_name / store_description / store_genres /
+# store_tags live inside stores[] and are concatenated into search_text).
+# Priority via weights (high → low):
+#   search_text (store name, description, genres, tags, …)
+#   > first_name, last_name > bio > profile_tags > state
 DESIGNER_QUERY_BY = "search_text,first_name,last_name,bio,profile_tags,state"
 DESIGNER_QUERY_WEIGHTS = "10,6,6,4,3,2"
 
@@ -110,7 +110,7 @@ def search_designers_core(payload):
     """
     Search designers collection.
     query_by priority (weights):
-      search_text (store_name + store_description + store_genres + more) >
+      search_text (store_name, store_description, store_genres, store_tags, …) >
       first_name, last_name > bio > profile_tags > state
     """
     semantic_query, normal_search, filter_search, skip, limit, region = (
@@ -248,7 +248,7 @@ def empty_designers_block(skip=0, limit=DEFAULT_LIMIT):
 def search_designers(payload):
     """
     Designer search priority:
-    1. Designers collection — search_text (includes store_name / description / genres)
+    1. Designers collection — search_text (store_name, description, genres, tags, …)
        then first_name, last_name, bio, profile_tags, state
     2. Designers linked via products collection matches (secondary)
     """
