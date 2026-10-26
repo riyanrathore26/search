@@ -15,14 +15,13 @@ logger = logging.getLogger(__name__)
 
 DESIGNERS_COLLECTION = "designers"
 
-# Field priority for text search (higher weight = higher rank):
-# 1. store_name  2. store_description  3. store_genres
-# 4. first_name / last_name / bio / profile_tags / state
-DESIGNER_QUERY_BY = (
-    "store_name,store_description,store_genres,"
-    "first_name,last_name,bio,profile_tags,state"
-)
-DESIGNER_QUERY_WEIGHTS = "10,8,6,5,5,4,3,2"
+# Actual schema fields (store_name / store_description / store_genres live
+# inside stores[] and are already concatenated into search_text).
+# Priority via weights:
+#   search_text (includes store_name, store_description, store_genres) >
+#   first_name, last_name > bio > profile_tags > state
+DESIGNER_QUERY_BY = "search_text,first_name,last_name,bio,profile_tags,state"
+DESIGNER_QUERY_WEIGHTS = "10,6,6,4,3,2"
 
 DESIGNER_FIELD_MAP = {
     "country": "country",
@@ -30,9 +29,6 @@ DESIGNER_FIELD_MAP = {
     "first_name": "first_name",
     "last_name": "last_name",
     "profile_tags": "profile_tags",
-    "store_name": "store_name",
-    "store_description": "store_description",
-    "store_genres": "store_genres",
     "node_0": "profile_tags",
     "node_1": "profile_tags",
     "node_2": "profile_tags",
@@ -44,7 +40,6 @@ DESIGNER_FIELD_MAP = {
 TAG_KEYS = {
     "profile_tags", "node_0", "node_1", "node_2",
     "Node-0 Art Style", "Node-1 Art Style", "Node-2 Art Style",
-    "store_genres",
 }
 
 
@@ -59,10 +54,9 @@ def build_designer_filter_by(normal_search, region=None):
 
         if isinstance(value, list):
             if key in TAG_KEYS:
-                schema_field = DESIGNER_FIELD_MAP.get(key, key)
                 for v in value:
                     if v is not None and v != "":
-                        filters.append(f"{schema_field}:={escape_filter_value(v)}")
+                        filters.append(f"profile_tags:={escape_filter_value(v)}")
                 continue
             raise ValueError(f"Normal_search.{key} must be a scalar or list")
 
@@ -115,9 +109,10 @@ def validate_designer_payload(payload):
 
 def search_designers_core(payload):
     """
-    Search designers collection with field priority:
-    store_name > store_description > store_genres >
-    first_name, last_name, bio, profile_tags, state
+    Search designers collection.
+    query_by priority (weights):
+      search_text (store_name + store_description + store_genres + more) >
+      first_name, last_name > bio > profile_tags > state
     """
     semantic_query, normal_search, filter_search, skip, limit, region = (
         validate_designer_payload(payload)
@@ -170,6 +165,23 @@ def search_designers_core(payload):
             designer["profile_image_url"] = generate_s3_url(
                 MODEL_DATA_BUCKET, designer["profile_image_key"]
             )
+        # enrich stores with S3 URLs when keys are present
+        stores = designer.get("stores") or []
+        if isinstance(stores, list):
+            enriched = []
+            for store in stores:
+                if isinstance(store, dict):
+                    store = dict(store)
+                    if store.get("main_image_key") and not store.get("main_image_url"):
+                        store["main_image_url"] = generate_s3_url(
+                            MODEL_DATA_BUCKET, store["main_image_key"]
+                        )
+                    if store.get("cover_image_key") and not store.get("cover_image_url"):
+                        store["cover_image_url"] = generate_s3_url(
+                            MODEL_DATA_BUCKET, store["cover_image_key"]
+                        )
+                enriched.append(store)
+            designer["stores"] = enriched
         if "vector_distance" in hit:
             designer["score"] = hit["vector_distance"]
         designers.append(designer)
@@ -229,8 +241,8 @@ def empty_designers_block(skip=0, limit=DEFAULT_LIMIT):
 def search_designers(payload):
     """
     Designer search priority:
-    1. Designers collection (store_name > store_description > store_genres >
-       first_name, last_name, bio, profile_tags, state)
+    1. Designers collection — search_text (includes store_name / description / genres)
+       then first_name, last_name, bio, profile_tags, state
     2. Designers linked via products collection matches (secondary)
     """
     if not has_search_criteria(payload):
