@@ -15,12 +15,24 @@ logger = logging.getLogger(__name__)
 
 DESIGNERS_COLLECTION = "designers"
 
+# Field priority for text search (higher weight = higher rank):
+# 1. store_name  2. store_description  3. store_genres
+# 4. first_name / last_name / bio / profile_tags / state
+DESIGNER_QUERY_BY = (
+    "store_name,store_description,store_genres,"
+    "first_name,last_name,bio,profile_tags,state"
+)
+DESIGNER_QUERY_WEIGHTS = "10,8,6,5,5,4,3,2"
+
 DESIGNER_FIELD_MAP = {
     "country": "country",
     "state": "state",
     "first_name": "first_name",
     "last_name": "last_name",
     "profile_tags": "profile_tags",
+    "store_name": "store_name",
+    "store_description": "store_description",
+    "store_genres": "store_genres",
     "node_0": "profile_tags",
     "node_1": "profile_tags",
     "node_2": "profile_tags",
@@ -32,6 +44,7 @@ DESIGNER_FIELD_MAP = {
 TAG_KEYS = {
     "profile_tags", "node_0", "node_1", "node_2",
     "Node-0 Art Style", "Node-1 Art Style", "Node-2 Art Style",
+    "store_genres",
 }
 
 
@@ -46,9 +59,10 @@ def build_designer_filter_by(normal_search, region=None):
 
         if isinstance(value, list):
             if key in TAG_KEYS:
+                schema_field = DESIGNER_FIELD_MAP.get(key, key)
                 for v in value:
                     if v is not None and v != "":
-                        filters.append(f"profile_tags:={escape_filter_value(v)}")
+                        filters.append(f"{schema_field}:={escape_filter_value(v)}")
                 continue
             raise ValueError(f"Normal_search.{key} must be a scalar or list")
 
@@ -100,6 +114,11 @@ def validate_designer_payload(payload):
 
 
 def search_designers_core(payload):
+    """
+    Search designers collection with field priority:
+    store_name > store_description > store_genres >
+    first_name, last_name, bio, profile_tags, state
+    """
     semantic_query, normal_search, filter_search, skip, limit, region = (
         validate_designer_payload(payload)
     )
@@ -115,7 +134,8 @@ def search_designers_core(payload):
 
     params = {
         "collection": DESIGNERS_COLLECTION,
-        "query_by": "search_text,first_name,last_name,bio,country",
+        "query_by": DESIGNER_QUERY_BY,
+        "query_by_weights": DESIGNER_QUERY_WEIGHTS,
         "per_page": fetch_limit,
         "page": page,
         "exclude_fields": "embedding",
@@ -207,15 +227,22 @@ def empty_designers_block(skip=0, limit=DEFAULT_LIMIT):
 
 
 def search_designers(payload):
-    """Designer search: direct matches + designers linked via product hits."""
+    """
+    Designer search priority:
+    1. Designers collection (store_name > store_description > store_genres >
+       first_name, last_name, bio, profile_tags, state)
+    2. Designers linked via products collection matches (secondary)
+    """
     if not has_search_criteria(payload):
         return empty_designers_block()
 
-    _, product_designer_ids = search_products(payload, return_designer_ids=True)
+    # 1) Primary: designers collection
     designer_result = search_designers_core(payload)
     direct = designer_result["designers"]
     seen = {str(d.get("user_id")) for d in direct if d.get("user_id")}
 
+    # 2) Secondary: products collection → designer_ids not already found
+    _, product_designer_ids = search_products(payload, return_designer_ids=True)
     missing = [uid for uid in product_designer_ids if uid not in seen]
     extra = fetch_designers_by_ids(missing)
 
