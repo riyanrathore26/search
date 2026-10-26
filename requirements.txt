@@ -1,0 +1,4 @@
+
+typesense
+fastembed
+onnxruntime
