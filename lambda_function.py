@@ -1,69 +1,16 @@
-"""
-Main Lambda handler.
-Routes to products_search / designer_search / home_search.
-"""
+"""Main Lambda handler. Routes to products / designer / home search."""
 import json
-import os
 import logging
 from product_search import search_products
 from designer_search import search_designers, empty_designers_block
 from home_search import search_home
-import typesense
-from fastembed import TextEmbedding
-
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
-MODEL_DIR = os.environ.get("MODEL_DIR", "/opt/models")
-MODEL_DATA_BUCKET = "wyidesigns-in"
-TYPESENSE_HOST = os.environ.get("TYPESENSE_HOST", "nqdrsa2he6xj5w0tp.a1.typesense.net")
-TYPESENSE_PORT = os.environ.get("TYPESENSE_PORT", "443")
-TYPESENSE_PROTOCOL = os.environ.get("TYPESENSE_PROTOCOL", "https")
-TYPESENSE_API_KEY = os.environ["TYPESENSE_API_KEY"]
-
-
 def make_response(status_code, body):
     return {"statusCode": status_code, "body": body}
-
-
-def get_model():
-    global _MODEL
-    if _MODEL is None:
-        # logger.info("Loading FastEmbed model from %s", MODEL_DIR)
-        _MODEL = TextEmbedding(
-            model_name=EMBEDDING_MODEL,
-            cache_dir=MODEL_DIR,
-            local_files_only=True,
-        )
-    return _MODEL
-
-
-def get_client():
-    global _CLIENT
-    if _CLIENT is None:
-        _CLIENT = typesense.Client(
-            {
-                "nodes": [
-                    {
-                        "host": TYPESENSE_HOST,
-                        "port": TYPESENSE_PORT,
-                        "protocol": TYPESENSE_PROTOCOL,
-                    }
-                ],
-                "api_key": TYPESENSE_API_KEY,
-                "connection_timeout_seconds": 30,
-            }
-        )
-    return _CLIENT
-
-
-def generate_s3_url(bucket, key):
-    if not key:
-        return None
-    return f"https://{bucket}.s3.amazonaws.com/{key}"
 
 
 def parse_payload(event):
@@ -95,7 +42,7 @@ def parse_payload(event):
 
 def detect_search_type(payload):
     keys = [k for k in ("products_search", "designer_search", "home_search") if k in payload]
-    if len(keys) == 0:
+    if not keys:
         raise ValueError(
             "Payload must contain exactly one of: products_search, designer_search, home_search"
         )
@@ -133,22 +80,18 @@ def lambda_handler(event, context):
         elif search_type == "designer_search":
             products_block = empty_products_block()
             designers_block = search_designers(inner)
-        else:  # home_search
+        else:
             products_block, designers_block = search_home(inner)
 
-        body = {
+        return make_response(200, {
             "search_type": search_type,
             "products": products_block,
             "designers": designers_block,
-        }
-        return make_response(200, body)
+        })
 
     except ValueError as exc:
         logger.warning("Invalid search request: %s", exc)
         return make_response(400, {"error": str(exc)})
     except Exception:
         logger.exception("Search failed")
-        return make_response(
-            500,
-            {"error": "Search failed. Check Lambda logs for details."},
-        )
+        return make_response(500, {"error": "Search failed. Check Lambda logs for details."})
