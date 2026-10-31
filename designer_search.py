@@ -1,5 +1,6 @@
 """Designer search module."""
 import logging
+import boto3
 from product_search import (
     generate_query_embedding,
     escape_filter_value,
@@ -10,11 +11,15 @@ from product_search import (
     MAX_VECTOR_K,
 )
 from utils import get_client, generate_s3_url
+from boto3.dynamodb.conditions import Key
 
 logger = logging.getLogger(__name__)
 
 DESIGNERS_COLLECTION = "designers"
 MODEL_DATA_BUCKET = "loomerprofiles-in"
+dynamodb = boto3.resource("dynamodb")
+catalog_table = dynamodb.Table("rassmoni_catalog-in")
+
 
 # Actual schema fields (store_name / store_description / store_genres /
 # store_tags live inside stores[] and are concatenated into search_text).
@@ -175,6 +180,7 @@ def search_designers_core(payload):
             )
         # enrich stores with S3 URLs when keys are present
         stores = designer.get("stores") or []
+        designer_id = designer.get("user_id")
         if isinstance(stores, list):
             enriched = []
             for store in stores:
@@ -190,6 +196,28 @@ def search_designers_core(payload):
                         )
                 enriched.append(store)
             designer["stores"] = enriched
+        print("designer_id",designer_id)
+        if (designer_id):
+            try:
+                query_params = {
+                    "IndexName": "designer_id-on_sale-index",
+                    "KeyConditionExpression": (
+                        Key("designer_id").eq(designer_id)
+                        & Key("on_sale").eq("yes")
+                    ),
+                    "Select": "COUNT",
+                }
+
+                print("st1")
+
+                response = catalog_table.query(**query_params)
+                designer["number_of_items_on_sale"] = response["Count"]
+            except (TypeError, ValueError) as exc:
+                print(f"Error: {exc}")
+                raise ValueError(
+                    "pagination.skip and pagination.limit must be integers"
+                ) from exc
+            
         if "vector_distance" in hit:
             designer["score"] = hit["vector_distance"]
         designers.append(designer)
