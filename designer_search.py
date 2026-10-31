@@ -9,11 +9,12 @@ from product_search import (
     MAX_LIMIT,
     MAX_VECTOR_K,
 )
-from utils import get_client, generate_s3_url, MODEL_DATA_BUCKET
+from utils import get_client, generate_s3_url
 
 logger = logging.getLogger(__name__)
 
 DESIGNERS_COLLECTION = "designers"
+MODEL_DATA_BUCKET = "loomerprofiles-in"
 
 # Actual schema fields (store_name / store_description / store_genres /
 # store_tags live inside stores[] and are concatenated into search_text).

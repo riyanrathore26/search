@@ -1,7 +1,7 @@
 """Product search module."""
 import math
 import logging
-from utils import generate_s3_url, get_client, get_model, MODEL_DATA_BUCKET
+from utils import generate_s3_url, get_client, get_model
 
 logger = logging.getLogger(__name__)
 
@@ -9,6 +9,7 @@ COLLECTION_NAME = "products"
 DEFAULT_LIMIT = 20
 MAX_LIMIT = 250
 MAX_VECTOR_K = 1000
+MODEL_DATA_BUCKET = "wyidesigns-in"
 
 # Payload node_N keys are offset by one against schema fields:
 #   node_1 → Node-0 Art Style
