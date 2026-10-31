@@ -9,12 +9,11 @@ from product_search import (
     MAX_LIMIT,
     MAX_VECTOR_K,
 )
-from utils import get_client, generate_s3_url
+from utils import get_client, generate_s3_url, MODEL_DATA_BUCKET
 
 logger = logging.getLogger(__name__)
 
 DESIGNERS_COLLECTION = "designers"
-MODEL_DATA_BUCKET = "loomerprofiles-in"
 
 # Actual schema fields (store_name / store_description / store_genres /
 # store_tags live inside stores[] and are concatenated into search_text).
@@ -26,6 +25,7 @@ DESIGNER_QUERY_WEIGHTS = "10,6,6,4,3,2"
 
 DESIGNER_FIELD_MAP = {
     "country": "country",
+    "designer_country": "country",  # payload alias → designers.country
     "state": "state",
     "first_name": "first_name",
     "last_name": "last_name",

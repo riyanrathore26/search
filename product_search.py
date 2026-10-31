@@ -1,9 +1,7 @@
 """Product search module."""
-
 import math
 import logging
-import boto3
-from utils import generate_s3_url, get_client, get_model
+from utils import generate_s3_url, get_client, get_model, MODEL_DATA_BUCKET
 
 logger = logging.getLogger(__name__)
 
@@ -11,10 +9,6 @@ COLLECTION_NAME = "products"
 DEFAULT_LIMIT = 20
 MAX_LIMIT = 250
 MAX_VECTOR_K = 1000
-MODEL_DATA_BUCKET = "wyidesigns-in"
-PROFILE_TABLE = "LoomerProfile-in"
-dynamodb = boto3.resource("dynamodb")
-
 
 # Payload node_N keys are offset by one against schema fields:
 #   node_1 → Node-0 Art Style
@@ -26,7 +20,7 @@ FIELD_MAP = {
     "fit": "fit",
     "primary_color_code": "primary_color_code",
     "selectedClothingType": "selectedClothingType",
-    "designer_country": "designer_country",
+    "designer_country": "country",  # products schema has country, not designer_country
     "color": "color",
     "selectedCategory": "selectedCategory",
     "target_audience": "target_audience",
@@ -87,9 +81,7 @@ def build_filter_by(normal_search, filter_search, price_field):
         if isinstance(value, (dict, list)):
             raise ValueError(f"Normal_search.{key} must be a scalar value")
         if key not in FIELD_MAP:
-            raise ValueError(
-                f"Unsupported Normal_search field: {key}. Add it to FIELD_MAP."
-            )
+            raise ValueError(f"Unsupported Normal_search field: {key}. Add it to FIELD_MAP.")
         schema_field = FIELD_MAP[key]
         if isinstance(value, bool):
             value = str(value).lower()
@@ -101,12 +93,8 @@ def build_filter_by(normal_search, filter_search, price_field):
     if not isinstance(range_search, dict):
         raise ValueError("Filter_search.range_search must be a JSON object")
 
-    min_price = parse_number(
-        range_search.get("minPrice"), "Filter_search.range_search.minPrice"
-    )
-    max_price = parse_number(
-        range_search.get("maxPrice"), "Filter_search.range_search.maxPrice"
-    )
+    min_price = parse_number(range_search.get("minPrice"), "Filter_search.range_search.minPrice")
+    max_price = parse_number(range_search.get("maxPrice"), "Filter_search.range_search.maxPrice")
     if min_price is not None and max_price is not None and min_price > max_price:
         raise ValueError("minPrice cannot be greater than maxPrice")
     if min_price is not None and max_price is not None:
@@ -171,9 +159,7 @@ def validate_payload(payload):
         skip = int(pagination.get("skip", 0))
         limit = int(pagination.get("limit", DEFAULT_LIMIT))
     except (TypeError, ValueError) as exc:
-        raise ValueError(
-            "pagination.skip and pagination.limit must be integers"
-        ) from exc
+        raise ValueError("pagination.skip and pagination.limit must be integers") from exc
 
     if skip < 0:
         raise ValueError("pagination.skip must be >= 0")
@@ -204,9 +190,7 @@ def has_search_criteria(payload):
         return True
 
     range_search = filters.get("range_search") or {}
-    if isinstance(range_search, dict) and any(
-        v is not None and v != "" for v in range_search.values()
-    ):
+    if isinstance(range_search, dict) and any(v is not None and v != "" for v in range_search.values()):
         return True
 
     sort_opts = filters.get("sort") or {}
@@ -237,9 +221,7 @@ def search_products(payload, return_designer_ids=False):
         empty = _empty_products()
         return (empty, set()) if return_designer_ids else empty
 
-    semantic_query, normal_search, filter_search, skip, limit = validate_payload(
-        payload
-    )
+    semantic_query, normal_search, filter_search, skip, limit = validate_payload(payload)
     price_field = resolve_price_field(payload)
     region = (payload.get("region") or "").strip().upper() or "US"
 
@@ -302,14 +284,9 @@ def search_products(payload, return_designer_ids=False):
     result = results[0]
     if result.get("error"):
         err = result["error"]
-        logger.error(
-            "Typesense product search error: %s | params=%s",
-            err,
-            {
-                k: params.get(k)
-                for k in ("q", "query_by", "query_by_weights", "filter_by", "sort_by")
-            },
-        )
+        logger.error("Typesense product search error: %s | params=%s", err, {
+            k: params.get(k) for k in ("q", "query_by", "query_by_weights", "filter_by", "sort_by")
+        })
         raise RuntimeError(err)
 
     hits = result.get("hits", [])[offset : offset + limit]
@@ -327,32 +304,13 @@ def search_products(payload, return_designer_ids=False):
                 if isinstance(model, dict):
                     model = dict(model)
                     if model.get("mockup_key"):
-                        model["mockup_url"] = generate_s3_url(
-                            MODEL_DATA_BUCKET, model["mockup_key"]
-                        )
+                        model["mockup_url"] = generate_s3_url(MODEL_DATA_BUCKET, model["mockup_key"])
                     if model.get("resized_mockup_key"):
                         model["resized_mockup_url"] = generate_s3_url(
                             MODEL_DATA_BUCKET, model["resized_mockup_key"]
                         )
                 updated.append(model)
             doc["model_data"] = updated
-        try:
-            designer_id = doc.get("designer_id", "")
-
-            if designer_id:
-                profile_response = dynamodb.Table(PROFILE_TABLE).get_item(
-                    Key={"user_id": designer_id},
-                    ProjectionExpression=(
-                        "user_id, stores, profile_image_url, first_name, "
-                        "last_name, profile_image_key, country"
-                    ),
-                )
-
-                profile = profile_response.get("Item", {})
-
-                doc["profile_image_url"] = profile.get("profile_image_url", "")
-        except:
-            print("e")
 
         if "vector_distance" in hit:
             doc["score"] = hit["vector_distance"]
