@@ -10,21 +10,28 @@ DEFAULT_LIMIT = 20
 MAX_LIMIT = 250
 MAX_VECTOR_K = 1000
 
+# Payload node_N keys are offset by one against schema fields:
+#   node_1 → Node-0 Art Style
+#   node_2 → Node-1 Art Style
+#   node_3 → Node-2 Art Style
+# Full schema names still accepted as-is for direct filters.
 FIELD_MAP = {
     "country": "country",
-    "node_1": "Node-1 Art Style",
     "fit": "fit",
     "primary_color_code": "primary_color_code",
     "selectedClothingType": "selectedClothingType",
     "designer_country": "designer_country",
-    "node_0": "node_0",
-    "node_2": "node_2",
     "color": "color",
     "selectedCategory": "selectedCategory",
     "target_audience": "target_audience",
     "store_name": "store_name",
     "designer_name": "designer_name",
     "RASIN": "RASIN",
+    # node_N (payload) → Node-(N-1) Art Style (schema)
+    "node_1": "Node-0 Art Style",
+    "node_2": "Node-1 Art Style",
+    "node_3": "Node-2 Art Style",
+    # direct schema field names
     "Node-0 Art Style": "Node-0 Art Style",
     "Node-1 Art Style": "Node-1 Art Style",
     "Node-2 Art Style": "Node-2 Art Style",
