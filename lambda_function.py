@@ -12,13 +12,7 @@ logger = logging.getLogger(__name__)
 def make_response(status_code, body):
     return {
         "statusCode": status_code,
-        "headers": {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Headers": "Content-Type,Authorization",
-            "Access-Control-Allow-Methods": "POST,OPTIONS",
-        },
-        "body": json.dumps(body, default=str),
+        "body": body,
     }
 
 
