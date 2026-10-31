@@ -12,6 +12,7 @@ from product_search import (
 )
 from utils import get_client, generate_s3_url
 from boto3.dynamodb.conditions import Key
+from utils import get_client, generate_s3_url
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,7 @@ DESIGNER_QUERY_WEIGHTS = "10,6,6,4,3,2"
 
 DESIGNER_FIELD_MAP = {
     "country": "country",
+    "designer_country": "country",  # payload alias → designers.country
     "state": "state",
     "first_name": "first_name",
     "last_name": "last_name",
