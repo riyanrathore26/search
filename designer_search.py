@@ -19,9 +19,9 @@ DESIGNERS_COLLECTION = "designers"
 # store_tags live inside stores[] and are concatenated into search_text).
 # Priority via weights (high → low):
 #   search_text (store name, description, genres, tags, …)
-#   > first_name, last_name > bio > profile_tags > state
-DESIGNER_QUERY_BY = "search_text,first_name,last_name,bio,profile_tags,state"
-DESIGNER_QUERY_WEIGHTS = "10,6,6,4,3,2"
+#   > first_name, last_name > bio > profile_tags > artist_type > state
+DESIGNER_QUERY_BY = "search_text,first_name,last_name,bio,profile_tags,artist_type,state"
+DESIGNER_QUERY_WEIGHTS = "10,6,6,4,3,3,2"
 
 DESIGNER_FIELD_MAP = {
     "country": "country",
@@ -30,6 +30,7 @@ DESIGNER_FIELD_MAP = {
     "first_name": "first_name",
     "last_name": "last_name",
     "profile_tags": "profile_tags",
+    "artist_type": "artist_type",
     "node_0": "profile_tags",
     "node_1": "profile_tags",
     "node_2": "profile_tags",
@@ -112,7 +113,7 @@ def search_designers_core(payload):
     Search designers collection.
     query_by priority (weights):
       search_text (store_name, store_description, store_genres, store_tags, …) >
-      first_name, last_name > bio > profile_tags > state
+      first_name, last_name > bio > profile_tags > artist_type > state
     """
     semantic_query, normal_search, filter_search, skip, limit, region = (
         validate_designer_payload(payload)
