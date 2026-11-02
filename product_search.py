@@ -43,6 +43,16 @@ FIELD_MAP = {
     "Node-2 Art Style": "Node-2 Art Style",
 }
 
+FIELDS_TO_DROP = {
+    "designTexture",
+    "design_areas",
+    "different_size_design_areas",
+    "different_size_design_textures",
+    "different_size_textures",
+    "embedding"
+}
+
+
 
 def generate_query_embedding(query):
     model = get_model()
@@ -270,7 +280,7 @@ def search_products(payload, return_designer_ids=False):
         "query_by_weights": "10,9,8,6,5,4,2",
         "per_page": fetch_limit,
         "page": page,
-        "exclude_fields": "embedding",
+        "exclude_fields": ",".join(sorted(FIELDS_TO_DROP)),
     }
 
     if semantic_query:
@@ -318,7 +328,8 @@ def search_products(payload, return_designer_ids=False):
 
     for hit in hits:
         doc = dict(hit.get("document") or {})
-        doc.pop("embedding", None)
+        for field in FIELDS_TO_DROP:
+            doc.pop(field, None)
 
         model_data = doc.get("model_data") or []
         if isinstance(model_data, list):
@@ -351,6 +362,10 @@ def search_products(payload, return_designer_ids=False):
                 profile = profile_response.get("Item", {})
 
                 doc["profile_image_url"] = profile.get("profile_image_url", "")
+                stores = profile.get("stores") or {}
+                if isinstance(stores, dict) and stores:
+                    first_store = next(iter(stores.values()), {}) or {}
+                    doc["store_image_url"] = first_store.get("main_image_url") or ""
         except:
             print("e")
 
