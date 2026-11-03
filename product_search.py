@@ -21,12 +21,14 @@ dynamodb = boto3.resource("dynamodb")
 #   node_2 → Node-1 Art Style
 #   node_3 → Node-2 Art Style
 # Full schema names still accepted as-is for direct filters.
+# "vibe" is special: matches any of vibe_1 / vibe_2 / vibe_3 (OR).
+# Handled in build_filter_by, not as a single FIELD_MAP entry.
 FIELD_MAP = {
     "country": "country",
     "fit": "fit",
     "primary_color_code": "primary_color_code",
     "selectedClothingType": "selectedClothingType",
-    "designer_country": "designer_country",
+    "designer_country": "country",  # products schema uses country
     "color": "color",
     "selectedCategory": "selectedCategory",
     "target_audience": "target_audience",
@@ -41,7 +43,13 @@ FIELD_MAP = {
     "Node-0 Art Style": "Node-0 Art Style",
     "Node-1 Art Style": "Node-1 Art Style",
     "Node-2 Art Style": "Node-2 Art Style",
+    # individual vibe fields (also accept direct keys)
+    "vibe_1": "vibe_1",
+    "vibe_2": "vibe_2",
+    "vibe_3": "vibe_3",
 }
+
+VIBE_FIELDS = ("vibe_1", "vibe_2", "vibe_3")
 
 FIELDS_TO_DROP = {
     "designTexture",
@@ -96,6 +104,16 @@ def build_filter_by(normal_search, filter_search, price_field):
             continue
         if isinstance(value, (dict, list)):
             raise ValueError(f"Normal_search.{key} must be a scalar value")
+
+        # vibe → match any of vibe_1 / vibe_2 / vibe_3
+        if key == "vibe":
+            if isinstance(value, bool):
+                value = str(value).lower()
+            escaped = escape_filter_value(value)
+            or_parts = [f"{f}:={escaped}" for f in VIBE_FIELDS]
+            filters.append("(" + " || ".join(or_parts) + ")")
+            continue
+
         if key not in FIELD_MAP:
             raise ValueError(
                 f"Unsupported Normal_search field: {key}. Add it to FIELD_MAP."
